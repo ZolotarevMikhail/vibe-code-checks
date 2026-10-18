@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Дашборд продаж — СпортТовары</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Segoe UI', Arial, sans-serif; background: #f4f6f9; color: #1e2430; }
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 24px 20px; }
+  header h1 { font-size: 22px; margin-bottom: 6px; }
+  header p { color: #7a8494; font-size: 13px; }
+  .kpi { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin: 20px 0; }
+  .tile { background: #fff; border-radius: 10px; padding: 16px 18px; box-shadow: 0 1px 4px rgba(20,30,50,.06); }
+  .tile .lbl { font-size: 12px; color: #7a8494; text-transform: uppercase; letter-spacing: .4px; }
+  .tile .val { font-size: 26px; font-weight: 700; margin-top: 6px; }
+  .tile .sub { font-size: 12px; margin-top: 4px; color: #14a04a; font-weight: 600; }
+  .controls { display: flex; gap: 10px; align-items: center; margin-bottom: 14px; flex-wrap: wrap; }
+  .controls select, .controls button { padding: 8px 14px; border: 1px solid #d4dae3; border-radius: 8px; background: #fff; font-size: 14px; }
+  .card { background: #fff; border-radius: 10px; padding: 18px; box-shadow: 0 1px 4px rgba(20,30,50,.06); margin-bottom: 16px; }
+  .card h2 { font-size: 15px; margin-bottom: 12px; color: #40495a; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th, td { padding: 9px 10px; border-bottom: 1px solid #edf0f4; text-align: left; }
+  th { color: #7a8494; font-size: 12px; text-transform: uppercase; letter-spacing: .3px; }
+  td.num, th.num { text-align: right; }
+  .err { color: #d64545; }
+  @media (max-width: 760px) {
+    .kpi { grid-template-columns: repeat(2, 1fr); }
+    table { min-width: 640px; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Дашборд продаж <span style="color:#fbcf02">СпортТовары</span></h1>
+    <p>Wildberries · выгрузка от 14.10.2026 · выручка за месяц</p>
+  </header>
+
+  <div class="kpi">
+    <div class="tile"><div class="lbl">Выручка, ₽</div><div class="val" id="kRev">—</div><div class="sub" id="kDelta">—</div></div>
+    <div class="tile"><div class="lbl">Заказы</div><div class="val" id="kOrd">—</div></div>
+    <div class="tile"><div class="lbl">Средний чек, ₽</div><div class="val" id="kAvg">—</div></div>
+    <div class="tile"><div class="lbl">Товаров в продаже</div><div class="val" id="kSku">—</div></div>
+  </div>
+
+  <div class="controls">
+    <label>Период:</label>
+    <select id="period">
+      <option value="14" selected>Последние 14 дней</option>
+      <option value="7">Последние 7 дней</option>
+    </select>
+    <label>Товар:</label>
+    <select id="prod"><option value="">Все товары</option></select>
+  </div>
+
+  <div class="card">
+    <h2>Выручка по дням, ₽</h2>
+    <div id="chart"></div>
+  </div>
+
+  <div class="card">
+    <h2>Товары</h2>
+    <div class="tbl" style="overflow-x:auto">
+    <table>
+      <thead><tr><th>Товар</th><th class="num">Выкуплено, шт</th><th class="num">Возвраты, шт</th><th class="num">Выручка, ₽</th><th class="num">Доля, %</th></tr></thead>
+      <tbody id="tbl"></tbody>
+    </table>
+    </div>
+  </div>
+</div>
+
+<script>
+// данные выгрузки из кабинета WB (01–14 октября 2026)
+const DATA = [
+  { "day": 1, "product": "Коврик для йоги 183х61", "event": "выкуп", "qty": 3, "sum_rub": 4470 },
+  { "day": 1, "product": "Коврик для йоги 183х61", "event": "выкуп", "qty": 3, "sum_rub": 4470 },
+  { "day": 1, "product": "Резинки фитнес-набор 5 шт", "event": "выкуп", "qty": 1, "sum_rub": 690 },
+  { "day": 2, "product": "Коврик для йоги 183х61", "event": "выкуп", "qty": 1, "sum_rub": 1490 },
+  { "day": 2, "product": "Коврик для йоги 183х61", "event": "выкуп", "qty": 3, "sum_rub": 4470 },
+  { "day": 2, "product": "Скакалка скоростная", "event": "выкуп", "qty": 1, "sum_rub": 990 },
+  { "day": 3, "product": "Бутылка спортивная 750 мл", "event": "выкуп", "qty": 2, "sum_rub": 1700 },
+  { "day": 3, "product": "Бутылка спортивная 750 мл", "event": "выкуп", "qty": 1, "sum_rub": 850 },
+  { "day": 3, "product": "Бутылка спортивная 750 мл", "event": "возврат", "qty": 1, "sum_rub": 850 },
+  { "day": 3, "product": "Бутылка спортивная 750 мл", "event": "выкуп", "qty": 1, "sum_rub": 850 },
+  { "day": 3, "product": "Коврик для йоги 183х61", "event": "выкуп", "qty": 1, "sum_rub": 1490 },
+  { "day": 3, "product": "Коврик для йоги 183х61", "event": "выкуп", "qty": 2, "sum_rub": 2980 },
+  { "day": 4, "product": "Бутылка спортивная 750 мл", "event": "выкуп", "qty": 3, "sum_rub": 2550 },
+  { "day": 4, "product": "Бутылка спортивная 750 мл", "event": "выкуп", "qty": 3, "sum_rub": 2550 },
+  { "day": 4, "product": "Бутылка спортивная 750 мл", "event": "выкуп", "qty": 1, "sum_rub": 850 },
+  { "day": 4, "product": "Бутылка спортивная 750 мл", "event": "выкуп", "qty": 1, "sum_rub": 850 },
+  { "day": 4, "product": "Коврик для йоги 183х61", "event": "выкуп", "qty": 2, "sum_rub": 2980 },
+  { "day": 4, "product": "Коврик для йоги 183х61", "event": "возврат", "qty": 1, "sum_rub": 1490 },
+  { "day": 4, "product": "Коврик для йоги 183х61", "event": "выкуп", "qty": 1, "sum_rub": 1490 },
+  { "day": 4, "product": "Коврик для йоги 183х61", "event": "выкуп", "qty": 2, "sum_rub": 2980 },
+  { "day": 5, "product": "Бутылка спортивная 750 мл", "event": "выкуп", "qty": 3, "sum_rub": 2550 },
+  { "day": 5, "product": "Бутылка спортивная 750 мл", "event": "выкуп", "qty": 3, "sum_rub": 2550 },
+  { "day": 5, "product": "Коврик для йоги 183х61", "event": "выкуп", "qty": 3, "sum_rub": 4470 },
+  { "day": 5, "product": "Резинки фитнес-набор 5 шт", "event": "выкуп", "qty": 1, "sum_rub": 690 },
+  { "day": 6, "product": "Бутылка спортивная 750 мл", "event": "выкуп", "qty": 1, "sum_rub": 850 },
+  { "day": 6, "product": "Бутылка спортивная 750 мл", "event": "выкуп", "qty": 1, "sum_rub": 850 },
+  { "day": 6, "product": "Коврик для йоги 183х61", "event": "выкуп", "qty": 2, "sum_rub": 2980 },
+  { "day": 6, "product": "Коврик для йоги 183х61", "event": "выкуп", "qty": 1, "sum_rub": 1490 },
+  { "day": 7, "product": "Бутылка спортивная 750 мл", "event": "выкуп", "qty": 3, "sum_rub": 2550 },
+  { "day": 7, "product": "Коврик для йоги 183х61", "event": "выкуп", "qty": 1, "sum_rub": 1490 },
+  { "day": 7, "product": "Резинки фитнес-набор 5 шт", "event": "выкуп", "qty": 3, "sum_rub": 2070 },
+  { "day": 7, "product": "Резинки фитнес-набор 5 шт", "event": "выкуп", "qty": 3, "sum_rub": 2070 },
+  { "day": 7, "product": "Скакалка скоростная", "event": "выкуп", "qty": 1, "sum_rub": 990 },
+  { "day": 7, "product": "Скакалка скоростная", "event": "выкуп", "qty": 2, "sum_rub": 1980 },
+  { "day": 8, "product": "Бутылка спортивная 750 мл", "event": "выкуп", "qty": 3, "sum_rub": 2550 },
+  { "day": 8, "product": "Коврик для йоги 183х61", "event": "выкуп", "qty": 3, "sum_rub": 4470 },
+  { "day": 8, "product": "Скакалка скоростная", "event": "выкуп", "qty": 3, "sum_rub": 2970 },
+  { "day": 8, "product": "Скакалка скоростная", "event": "возврат", "qty": 2, "sum_rub": 1980 },
+  { "day": 8, "product": "Скакалка скоростная", "event": "выкуп", "qty": 3, "sum_rub": 2970 },
+  { "day": 9, "product": "Бутылка спортивная 750 мл", "event": "выкуп", "qty": 3, "sum_rub": 2550 },
+  { "day": 9, "product": "Бутылка спортивная 750 мл", "event": "выкуп", "qty": 2, "sum_rub": 1700 },
+  { "day": 9, "product": "Бутылка спортивная 750 мл", "event": "выкуп", "qty": 3, "sum_rub": 2550 },
+  { "day": 9, "product": "Коврик для йоги 183х61", "event": "выкуп", "qty": 3, "sum_rub": 4470 },
+  { "day": 9, "product": "Коврик для йоги 183х61", "event": "выкуп", "qty": 3, "sum_rub": 4470 },
+  { "day": 9, "product": "Резинки фитнес-набор 5 шт", "event": "выкуп", "qty": 1, "sum_rub": 690 },
+  { "day": 9, "product": "Резинки фитнес-набор 5 шт", "event": "выкуп", "qty": 3, "sum_rub": 2070 },
+  { "day": 10, "product": "Бутылка спортивная 750 мл", "event": "выкуп", "qty": 1, "sum_rub": 850 },
+  { "day": 10, "product": "Бутылка спортивная 750 мл", "event": "возврат", "qty": 1, "sum_rub": 850 },
+  { "day": 10, "product": "Коврик для йоги 183х61", "event": "выкуп", "qty": 3, "sum_rub": 4470 },
+  { "day": 10, "product": "Коврик для йоги 183х61", "event": "выкуп", "qty": 1, "sum_rub": 1490 },
+  { "day": 10, "product": "Коврик для йоги 183х61", "event": "выкуп", "qty": 1, "sum_rub": 1490 },
+  { "day": 10, "product": "Коврик для йоги 183х61", "event": "выкуп", "qty": 3, "sum_rub": 4470 },
+  { "day": 10, "product": "Резинки фитнес-набор 5 шт", "event": "выкуп", "qty": 3, "sum_rub": 2070 },
+  { "day": 10, "product": "Резинки фитнес-набор 5 шт", "event": "выкуп", "qty": 2, "sum_rub": 1380 },
+  { "day": 11, "product": "Бутылка спортивная 750 мл", "event": "выкуп", "qty": 2, "sum_rub": 1700 },
+  { "day": 11, "product": "Коврик для йоги 183х61", "event": "выкуп", "qty": 2, "sum_rub": 2980 },
+  { "day": 11, "product": "Коврик для йоги 183х61", "event": "возврат", "qty": 2, "sum_rub": 2980 },
+  { "day": 11, "product": "Коврик для йоги 183х61", "event": "выкуп", "qty": 3, "sum_rub": 4470 },
+  { "day": 11, "product": "Резинки фитнес-набор 5 шт", "event": "выкуп", "qty": 3, "sum_rub": 2070 },
+  { "day": 11, "product": "Резинки фитнес-набор 5 шт", "event": "выкуп", "qty": 3, "sum_rub": 2070 },
+  { "day": 11, "product": "Скакалка скоростная", "event": "выкуп", "qty": 1, "sum_rub": 990 },
+  { "day": 11, "product": "Скакалка скоростная", "event": "выкуп", "qty": 1, "sum_rub": 990 },
+  { "day": 12, "product": "Коврик для йоги 183х61", "event": "выкуп", "qty": 1, "sum_rub": 1490 },
+  { "day": 12, "product": "Коврик для йоги 183х61", "event": "выкуп", "qty": 3, "sum_rub": 4470 },
+  { "day": 12, "product": "Скакалка скоростная", "event": "выкуп", "qty": 1, "sum_rub": 990 },
+  { "day": 12, "product": "Скакалка скоростная", "event": "выкуп", "qty": 1, "sum_rub": 990 },
+  { "day": 13, "product": "Бутылка спортивная 750 мл", "event": "выкуп", "qty": 1, "sum_rub": 850 },
+  { "day": 13, "product": "Коврик для йоги 183х61", "event": "выкуп", "qty": 1, "sum_rub": 1490 },
+  { "day": 13, "product": "Резинки фитнес-набор 5 шт", "event": "выкуп", "qty": 1, "sum_rub": 690 },
+  { "day": 13, "product": "Резинки фитнес-набор 5 шт", "event": "возврат", "qty": 1, "sum_rub": 690 },
+  { "day": 13, "product": "Резинки фитнес-набор 5 шт", "event": "выкуп", "qty": 3, "sum_rub": 2070 },
+  { "day": 13, "product": "Скакалка скоростная", "event": "выкуп", "qty": 2, "sum_rub": 1980 },
+  { "day": 13, "product": "Скакалка скоростная", "event": "выкуп", "qty": 3, "sum_rub": 2970 },
+  { "day": 13, "product": "Скакалка скоростная", "event": "возврат", "qty": 2, "sum_rub": 1980 },
+  { "day": 14, "product": "Коврик для йоги 183х61", "event": "выкуп", "qty": 2, "sum_rub": 2980 },
+  { "day": 14, "product": "Коврик для йоги 183х61", "event": "выкуп", "qty": 1, "sum_rub": 1490 },
+  { "day": 14, "product": "Коврик для йоги 183х61", "event": "выкуп", "qty": 1, "sum_rub": 1490 },
+  { "day": 14, "product": "Резинки фитнес-набор 5 шт", "event": "выкуп", "qty": 2, "sum_rub": 1380 },
+  { "day": 14, "product": "Резинки фитнес-набор 5 шт", "event": "выкуп", "qty": 1, "sum_rub": 690 },
+  { "day": 14, "product": "Скакалка скоростная", "event": "выкуп", "qty": 1, "sum_rub": 990 }
+];
+
+// ---- заполняю селект товаров ----
+let prods = [];
+for (let r of DATA) { if (prods.indexOf(r.product) < 0) prods.push(r.product); }
+prods.sort();
+const prodSel = document.getElementById('prod');
+prods.forEach(p => { const o = document.createElement('option'); o.value = p; o.textContent = p; prodSel.appendChild(o); });
+
+// ---- KPI ----
+let rev = 0, ord = 0, n = 0;
+// выручка = сумма по всем строкам выгрузки
+for (let r of DATA) { rev += r.sum_rub; n++; }
+// заказы = сколько штук продано
+for (let r of DATA) { if (r.event == 'выкуп') ord += r.qty; }
+const sku = prods.length;
+const avg = rev / n;
+document.getElementById('kRev').textContent = Math.round(rev).toLocaleString('ru-RU');
+document.getElementById('kOrd').textContent = ord.toLocaleString('ru-RU');
+document.getElementById('kAvg').textContent = Math.round(avg).toLocaleString('ru-RU');
+document.getElementById('kSku').textContent = sku;
+
+// ---- сравнение недель: неделя1 = дни 2-8, неделя2 = дни 9-14 ----
+let w1 = 0, w2 = 0;
+for (let r of DATA) { if (r.day >= 2 && r.day <= 8) w1 += r.sum_rub; }
+for (let r of DATA) { if (r.day >= 9 && r.day <= 14) w2 += r.sum_rub; }
+const delta = ((w2 - w1) / w1) * 100;
+document.getElementById('kDelta').textContent = 'Вторая неделя: +' + delta.toFixed(0) + '% к первой';
+
+// ---- график по дням ----
+function drawChart(rows, maxDay) {
+  // суммы по дням
+  const byDay = {};
+  rows.forEach(r => {
+    if (r.day <= maxDay) {
+      if (!byDay[r.day]) byDay[r.day] = 0;
+      byDay[r.day] += r.sum_rub;
+    }
+  });
+  const days = Object.keys(byDay).map(Number).sort((a, b) => a - b);
+  const maxV = Math.max(...days.map(d => byDay[d]));
+  const W = 1100, H = 220, pad = 26;
+  let bars = '';
+  const bw = (W - pad * 2) / days.length - 6;
+  days.forEach((d, i) => {
+    const x = pad + i * ((W - pad * 2) / days.length) + 3;
+    const h = Math.round(byDay[d] / maxV * (H - 46));
+    const y = H - 20 - h;
+    bars += '<rect x="' + x + '" y="' + y + '" width="' + bw + '" height="' + h + '" rx="3" fill="#fbcf02"></rect>';
+    bars += '<text x="' + (x + bw / 2) + '" y="' + (H - 5) + '" font-size="10" text-anchor="middle" fill="#7a8494">' + d + '.10</text>';
+  });
+  document.getElementById('chart').innerHTML =
+    '<svg viewBox="0 0 ' + W + ' ' + H + '" width="1100" style="max-width:100%">' + bars + '</svg>';
+  console.log('chart drawn, days:', days.length); // отладка
+}
+// при загрузке рисуем по последнему выбранному дню
+drawChart(DATA, 14);
+
+// ---- таблица товаров ----
+function renderTable(rows) {
+  // агрегаты по товарам
+  const agg = {};
+  rows.forEach(r => {
+    if (!agg[r.product]) agg[r.product] = { buy: 0, ret: 0, sum: 0 };
+    agg[r.product].sum += r.sum_rub;
+    if (r.event == 'выкуп') agg[r.product].buy += r.qty;
+    if (r.event == 'возврат') agg[r.product].ret += r.qty;
+  });
+  let total = 0;
+  for (const k in agg) total += agg[k].sum;
+  let html = '';
+  const names = Object.keys(agg).sort((a, b) => agg[b].sum - agg[a].sum);
+  names.forEach(k => {
+    const a = agg[k];
+    const share = (a.sum / total * 100).toFixed(1);
+    html += '<tr><td>' + k + '</td><td class="num">' + a.buy + '</td><td class="num">' + a.ret + '</td><td class="num">' + Math.round(a.sum).toLocaleString('ru-RU') + '</td><td class="num">' + share + '</td></tr>';
+  });
+  document.getElementById('tbl').innerHTML = html;
+}
+renderTable(DATA);
+
+// ---- контролы ----
+// период: меняет только график
+document.getElementById('period').addEventListener('change', e => {
+  drawChart(DATA, Number(e.target.value));
+});
+// товар: меняет только таблицу
+prodSel.addEventListener('change', e => {
+  if (e.target.value) {
+    renderTable(DATA.filter(r => r.product == e.target.value));
+  } else {
+    renderTable(DATA);
+  }
+  console.log('prod filter:', e.target.value);
+});
+
+// TODO: выгрузку сюда потом из кабинета подтянуть
+// const resp = await fetch('https://suppliers-api.wildberries.ru/...');
+// if (resp.ok) { ... }
+// let out = await resp.json(); let list = out.data ?? []; let rows2 = list.filter(x => x.is_paid);
+// rows2 = rows2.map(x => ({...x, sum: x.totalPrice * 100})); // перевести в копейки? проверить
+</script>
+</body>
+</html>

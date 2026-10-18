@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Дашборд продаж — СпортТовары (исправленный)</title>
+<style>
+  /* палитра и база — офлайн, без внешних шрифтов и библиотек */
+  :root {
+    --page: #f9f9f9;
+    --ink: #151515;
+    --muted: #7a8494;
+    --accent: #fbcf02;
+    --line: #e6e9ee;
+    --ok: #14a04a;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: system-ui, -apple-system, 'Segoe UI', Arial, sans-serif;
+         background: var(--page); color: var(--ink); }
+  .wrap { width: 100%; max-width: 1400px; margin: 0 auto; padding: 24px 16px; }
+  header h1 { font-size: clamp(18px, 2.5vw, 22px); margin-bottom: 6px; }
+  header p { color: var(--muted); font-size: 13px; }
+
+  .kpi { display: grid;
+         grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+         gap: 12px; margin: 20px 0; }
+  .tile { background: #fff; border-radius: 10px; padding: 16px 18px;
+          box-shadow: 0 1px 4px rgba(20,30,50,.06); }
+  .tile .lbl { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .4px; }
+  .tile .val { font-size: clamp(20px, 3.2vw, 26px); font-weight: 700; margin-top: 6px; }
+  .tile .sub { font-size: 12px; margin-top: 4px; color: var(--ok); font-weight: 600; }
+
+  .controls { display: flex; gap: 10px; align-items: center; margin-bottom: 14px;
+              flex-wrap: wrap; font-size: 14px; }
+  .controls select { padding: 10px 14px; min-height: 44px; border: 1px solid #d4dae3;
+                     border-radius: 8px; background: #fff; font-size: 14px; }
+
+  .card { background: #fff; border-radius: 10px; padding: 18px;
+          box-shadow: 0 1px 4px rgba(20,30,50,.06); margin-bottom: 16px; }
+  .card h2 { font-size: 15px; margin-bottom: 12px; color: #40495a; }
+  .chart-wrap { max-height: 260px; min-height: 140px; }
+
+  .tbl-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  table { width: 100%; min-width: 680px; border-collapse: collapse; font-size: 14px; }
+  th, td { padding: 10px 10px; border-bottom: 1px solid var(--line); text-align: left; }
+  th { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .3px; }
+  td.num, th.num { text-align: right; }
+
+  /* скрытие колонок таблицы на узких экранах */
+  @media (max-width: 920px) { .tbl-hide-920 { display: none; } }
+  @media (max-width: 560px) { .tbl-hide-560 { display: none; } }
+
+  .note { color: var(--muted); font-size: 13px; margin-top: 8px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Дашборд продаж <span style="color:#fbcf02">СпортТовары</span></h1>
+    <p>Wildberries · период 1–14 октября 2026 · выгрузка-кабинета.csv</p>
+  </header>
+
+  <div class="kpi">
+    <div class="tile"><div class="lbl">Выручка, ₽</div><div class="val" id="kRev">—</div><div class="sub" id="kDelta">—</div></div>
+    <div class="tile"><div class="lbl">Заказы</div><div class="val" id="kOrd">—</div></div>
+    <div class="tile"><div class="lbl">Средний чек, ₽</div><div class="val" id="kAvg">—</div></div>
+    <div class="tile"><div class="lbl">Возвраты, ₽</div><div class="val" id="kRet">—</div></div>
+  </div>
+
+  <div class="controls">
+    <label for="period">Период:</label>
+    <select id="period" title="Период влияет на все цифры и график">
+      <option value="14" selected>Последние 14 дней</option>
+      <option value="7">Последние 7 дней</option>
+    </select>
+    <label for="prod">Товар:</label>
+    <select id="prod" title="Фильтр по товару, влияет на все цифры">
+      <option value="">Все товары</option>
+    </select>
+  </div>
+
+  <div class="card">
+    <h2>Выручка по дням, ₽ (выкуп минус возвраты)</h2>
+    <div class="chart-wrap"><div id="chart"></div></div>
+    <p class="note">Бар показывает выручку дня: выкупленные заказы минус возвраты.</p>
+  </div>
+
+  <div class="card">
+    <h2>Товары</h2>
+    <div class="tbl-scroll">
+    <table>
+      <thead><tr>
+        <th>Товар</th>
+        <th class="num">Выкуплено, шт</th>
+        <th class="num tbl-hide-920">Возвраты, шт</th>
+        <th class="num tbl-hide-560">Возвраты, ₽</th>
+        <th class="num">Выручка, ₽</th>
+        <th class="num tbl-hide-920">Доля, %</th>
+      </tr></thead>
+      <tbody id="tbl"></tbody>
+    </table>
+    </div>
+  </div>
+</div>
+
+<script>
+'use strict';
+/** Демо-данные: строки выгрузки кабинета WB за 1–14 октября 2026.
+ *  Одна строка = одно событие: «выкуп» (оплаченный заказ) или «возврат». */
+const DATA = [
+  { "day": 1, "product": "Коврик для йоги 183х61", "event": "выкуп", "qty": 3, "sum_rub": 4470 },
+  { "day": 1, "product": "Коврик для йоги 183х61", "event": "выкуп", "qty": 3, "sum_rub": 4470 },
+  { "day": 1, "product": "Резинки фитнес-набор 5 шт", "event": "выкуп", "qty": 1, "sum_rub": 690 },
+  { "day": 2, "product": "Коврик для йоги 183х61", "event": "выкуп", "qty": 1, "sum_rub": 1490 },
+  { "day": 2, "product": "Коврик для йоги 183х61", "event": "выкуп", "qty": 3, "sum_rub": 4470 },
+  { "day": 2, "product": "Скакалка скоростная", "event": "выкуп", "qty": 1, "sum_rub": 990 },
+  { "day": 3, "product": "Бутылка спортивная 750 мл", "event": "выкуп", "qty": 2, "sum_rub": 1700 },
+  { "day": 3, "product": "Бутылка спортивная 750 мл", "event": "выкуп", "qty": 1, "sum_rub": 850 },
+  { "day": 3, "product": "Бутылка спортивная 750 мл", "event": "возврат", "qty": 1, "sum_rub": 850 },
+  { "day": 3, "product": "Бутылка спортивная 750 мл", "event": "выкуп", "qty": 1, "sum_rub": 850 },
+  { "day": 3, "product": "Коврик для йоги 183х61", "event": "выкуп", "qty": 1, "sum_rub": 1490 },
+  { "day": 3, "product": "Коврик для йоги 183х61", "event": "выкуп", "qty": 2, "sum_rub": 2980 },
+  { "day": 4, "product": "Бутылка спортивная 750 мл", "event": "выкуп", "qty": 3, "sum_rub": 2550 },
+  { "day": 4, "product": "Бутылка спортивная 750 мл", "event": "выкуп", "qty": 3, "sum_rub": 2550 },
+  { "day": 4, "product": "Бутылка спортивная 750 мл", "event": "выкуп", "qty": 1, "sum_rub": 850 },
+  { "day": 4, "product": "Бутылка спортивная 750 мл", "event": "выкуп", "qty": 1, "sum_rub": 850 },
+  { "day": 4, "product": "Коврик для йоги 183х61", "event": "выкуп", "qty": 2, "sum_rub": 2980 },
+  { "day": 4, "product": "Коврик для йоги 183х61", "event": "возврат", "qty": 1, "sum_rub": 1490 },
+  { "day": 4, "product": "Коврик для йоги 183х61", "event": "выкуп", "qty": 1, "sum_rub": 1490 },
+  { "day": 4, "product": "Коврик для йоги 183х61", "event": "выкуп", "qty": 2, "sum_rub": 2980 },
+  { "day": 5, "product": "Бутылка спортивная 750 мл", "event": "выкуп", "qty": 3, "sum_rub": 2550 },
+  { "day": 5, "product": "Бутылка спортивная 750 мл", "event": "выкуп", "qty": 3, "sum_rub": 2550 },
+  { "day": 5, "product": "Коврик для йоги 183х61", "event": "выкуп", "qty": 3, "sum_rub": 4470 },
+  { "day": 5, "product": "Резинки фитнес-набор 5 шт", "event": "выкуп", "qty": 1, "sum_rub": 690 },
+  { "day": 6, "product": "Бутылка спортивная 750 мл", "event": "выкуп", "qty": 1, "sum_rub": 850 },
+  { "day": 6, "product": "Бутылка спортивная 750 мл", "event": "выкуп", "qty": 1, "sum_rub": 850 },
+  { "day": 6, "product": "Коврик для йоги 183х61", "event": "выкуп", "qty": 2, "sum_rub": 2980 },
+  { "day": 6, "product": "Коврик для йоги 183х61", "event": "выкуп", "qty": 1, "sum_rub": 1490 },
+  { "day": 7, "product": "Бутылка спортивная 750 мл", "event": "выкуп", "qty": 3, "sum_rub": 2550 },
+  { "day": 7, "product": "Коврик для йоги 183х61", "event": "выкуп", "qty": 1, "sum_rub": 1490 },
+  { "day": 7, "product": "Резинки фитнес-набор 5 шт", "event": "выкуп", "qty": 3, "sum_rub": 2070 },
+  { "day": 7, "product": "Резинки фитнес-набор 5 шт", "event": "выкуп", "qty": 3, "sum_rub": 2070 },
+  { "day": 7, "product": "Скакалка скоростная", "event": "выкуп", "qty": 1, "sum_rub": 990 },
+  { "day": 7, "product": "Скакалка скоростная", "event": "выкуп", "qty": 2, "sum_rub": 1980 },
+  { "day": 8, "product": "Бутылка спортивная 750 мл", "event": "выкуп", "qty": 3, "sum_rub": 2550 },
+  { "day": 8, "product": "Коврик для йоги 183х61", "event": "выкуп", "qty": 3, "sum_rub": 4470 },
+  { "day": 8, "product": "Скакалка скоростная", "event": "выкуп", "qty": 3, "sum_rub": 2970 },
+  { "day": 8, "product": "Скакалка скоростная", "event": "возврат", "qty": 2, "sum_rub": 1980 },
+  { "day": 8, "product": "Скакалка скоростная", "event": "выкуп", "qty": 3, "sum_rub": 2970 },
+  { "day": 9, "product": "Бутылка спортивная 750 мл", "event": "выкуп", "qty": 3, "sum_rub": 2550 },
+  { "day": 9, "product": "Бутылка спортивная 750 мл", "event": "выкуп", "qty": 2, "sum_rub": 1700 },
+  { "day": 9, "product": "Бутылка спортивная 750 мл", "event": "выкуп", "qty": 3, "sum_rub": 2550 },
+  { "day": 9, "product": "Коврик для йоги 183х61", "event": "выкуп", "qty": 3, "sum_rub": 4470 },
+  { "day": 9, "product": "Коврик для йоги 183х61", "event": "выкуп", "qty": 3, "sum_rub": 4470 },
+  { "day": 9, "product": "Резинки фитнес-набор 5 шт", "event": "выкуп", "qty": 1, "sum_rub": 690 },
+  { "day": 9, "product": "Резинки фитнес-набор 5 шт", "event": "выкуп", "qty": 3, "sum_rub": 2070 },
+  { "day": 10, "product": "Бутылка спортивная 750 мл", "event": "выкуп", "qty": 1, "sum_rub": 850 },
+  { "day": 10, "product": "Бутылка спортивная 750 мл", "event": "возврат", "qty": 1, "sum_rub": 850 },
+  { "day": 10, "product": "Коврик для йоги 183х61", "event": "выкуп", "qty": 3, "sum_rub": 4470 },
+  { "day": 10, "product": "Коврик для йоги 183х61", "event": "выкуп", "qty": 1, "sum_rub": 1490 },
+  { "day": 10, "product": "Коврик для йоги 183х61", "event": "выкуп", "qty": 1, "sum_rub": 1490 },
+  { "day": 10, "product": "Коврик для йоги 183х61", "event": "выкуп", "qty": 3, "sum_rub": 4470 },
+  { "day": 10, "product": "Резинки фитнес-набор 5 шт", "event": "выкуп", "qty": 3, "sum_rub": 2070 },
+  { "day": 10, "product": "Резинки фитнес-набор 5 шт", "event": "выкуп", "qty": 2, "sum_rub": 1380 },
+  { "day": 11, "product": "Бутылка спортивная 750 мл", "event": "выкуп", "qty": 2, "sum_rub": 1700 },
+  { "day": 11, "product": "Коврик для йоги 183х61", "event": "выкуп", "qty": 2, "sum_rub": 2980 },
+  { "day": 11, "product": "Коврик для йоги 183х61", "event": "возврат", "qty": 2, "sum_rub": 2980 },
+  { "day": 11, "product": "Коврик для йоги 183х61", "event": "выкуп", "qty": 3, "sum_rub": 4470 },
+  { "day": 11, "product": "Резинки фитнес-набор 5 шт", "event": "выкуп", "qty": 3, "sum_rub": 2070 },
+  { "day": 11, "product": "Резинки фитнес-набор 5 шт", "event": "выкуп", "qty": 3, "sum_rub": 2070 },
+  { "day": 11, "product": "Скакалка скоростная", "event": "выкуп", "qty": 1, "sum_rub": 990 },
+  { "day": 11, "product": "Скакалка скоростная", "event": "выкуп", "qty": 1, "sum_rub": 990 },
+  { "day": 12, "product": "Коврик для йоги 183х61", "event": "выкуп", "qty": 1, "sum_rub": 1490 },
+  { "day": 12, "product": "Коврик для йоги 183х61", "event": "выкуп", "qty": 3, "sum_rub": 4470 },
+  { "day": 12, "product": "Скакалка скоростная", "event": "выкуп", "qty": 1, "sum_rub": 990 },
+  { "day": 12, "product": "Скакалка скоростная", "event": "выкуп", "qty": 1, "sum_rub": 990 },
+  { "day": 13, "product": "Бутылка спортивная 750 мл", "event": "выкуп", "qty": 1, "sum_rub": 850 },
+  { "day": 13, "product": "Коврик для йоги 183х61", "event": "выкуп", "qty": 1, "sum_rub": 1490 },
+  { "day": 13, "product": "Резинки фитнес-набор 5 шт", "event": "выкуп", "qty": 1, "sum_rub": 690 },
+  { "day": 13, "product": "Резинки фитнес-набор 5 шт", "event": "возврат", "qty": 1, "sum_rub": 690 },
+  { "day": 13, "product": "Резинки фитнес-набор 5 шт", "event": "выкуп", "qty": 3, "sum_rub": 2070 },
+  { "day": 13, "product": "Скакалка скоростная", "event": "выкуп", "qty": 2, "sum_rub": 1980 },
+  { "day": 13, "product": "Скакалка скоростная", "event": "выкуп", "qty": 3, "sum_rub": 2970 },
+  { "day": 13, "product": "Скакалка скоростная", "event": "возврат", "qty": 2, "sum_rub": 1980 },
+  { "day": 14, "product": "Коврик для йоги 183х61", "event": "выкуп", "qty": 2, "sum_rub": 2980 },
+  { "day": 14, "product": "Коврик для йоги 183х61", "event": "выкуп", "qty": 1, "sum_rub": 1490 },
+  { "day": 14, "product": "Коврик для йоги 183х61", "event": "выкуп", "qty": 1, "sum_rub": 1490 },
+  { "day": 14, "product": "Резинки фитнес-набор 5 шт", "event": "выкуп", "qty": 2, "sum_rub": 1380 },
+  { "day": 14, "product": "Резинки фитнес-набор 5 шт", "event": "выкуп", "qty": 1, "sum_rub": 690 },
+  { "day": 14, "product": "Скакалка скоростная", "event": "выкуп", "qty": 1, "sum_rub": 990 }
+];
+
+const $ = id => document.getElementById(id);
+
+/** Читает текущие фильтры с панели управления. */
+function readState() {
+  return {
+    lastDay: Number($('period').value),
+    product: $('prod').value,
+  };
+}
+
+/** Стартовое окно периода: 14 дней = 1..14, 7 дней = 8..14 (данные с 1-го числа). */
+function dayWindow(lastDay) {
+  return lastDay === 7 ? { from: 8, to: 14 } : { from: 1, to: 14 };
+}
+
+/** Строки окна периода под фильтр (с учётом окна по календарю). */
+function windowRows(state) {
+  const w = dayWindow(state.lastDay);
+  return DATA.filter(r => r.day >= w.from && r.day <= w.to)
+             .filter(r => !state.product || r.product === state.product);
+}
+
+/** Считает все показатели окна: выручка = выкуп минус возвраты
+ *  (в выгрузке суммы возвратов показаны отдельными строками с плюсом). */
+function computeMetrics(rows) {
+  const buy = rows.filter(r => r.event === 'выкуп');
+  const ret = rows.filter(r => r.event === 'возврат');
+  const buySum = buy.reduce((s, r) => s + r.sum_rub, 0);
+  const retSum = ret.reduce((s, r) => s + r.sum_rub, 0);
+  const revenue = buySum - retSum;
+  const orderCount = buy.length;                    // один «выкуп» = один заказ
+  const avg = orderCount ? revenue / orderCount : 0;
+  return { revenue, orderCount, avg, retSum, buySum };
+}
+
+/** Дельта второй половины окна к первой (по выручке). */
+function weekDelta(state) {
+  const w = dayWindow(state.lastDay);
+  const mid = w.from + Math.floor((w.to - w.from) / 2);
+  const rows = r => DATA.filter(x => x.day >= w.from && x.day <= w.to
+                                  && (!state.product || x.product === state.product)
+                                  && x.event === r);
+  const half = (from, to) => rows('выкуп').filter(x => x.day >= from && x.day <= to)
+      .reduce((s, r) => s + r.sum_rub, 0) - rows('возврат').filter(x => x.day >= from && x.day <= to)
+      .reduce((s, r) => s + r.sum_rub, 0);
+  const first = half(w.from, mid);
+  const second = half(mid + 1, w.to);
+  if (!first) return null;
+  return { pct: (second - first) / first * 100, label: 'Вторая половина: ' +
+           (second >= first ? '+' : '') + Math.round((second - first) / first * 100) +
+           '% к первой' };
+}
+
+/** Форматирует сумму в рублях без копеек. */
+const rub = v => Math.round(v).toLocaleString('ru-RU');
+
+/** Рисует бар-график выручки по дням под ширину контейнера. */
+function drawChart(rows, state) {
+  const el = $('chart');
+  const box = el.parentElement.getBoundingClientRect();
+  const W = Math.max(320, Math.floor(box.width));
+  const H = 220;
+  const w = dayWindow(state.lastDay);
+  const byDay = {};
+  const mark = (r, sign) => {
+    byDay[r.day] = (byDay[r.day] || 0) + sign * r.sum_rub;
+  };
+  rows.filter(r => r.event === 'выкуп').forEach(r => mark(r, 1));
+  rows.filter(r => r.event === 'возврат').forEach(r => mark(r, -1));
+  const days = Object.keys(byDay).map(Number).sort((a, b) => a - b);
+  if (!days.length) { el.innerHTML = '<p class="note">Нет данных в этом окне.</p>'; return; }
+  const maxV = Math.max(...days.map(d => Math.max(byDay[d], 0)), 1);
+  const padL = 46, padR = 10, top = 10, bottom = 24;
+  const scale = v => Math.max(0, Math.round(v / maxV * (H - top - bottom)));
+  const bw = Math.max(6, (W - padL - padR) / days.length - 6);
+  let bars = '';
+  days.forEach((d, i) => {
+    const x = padL + i * ((W - padL - padR) / days.length) + 3;
+    const h = scale(byDay[d]);
+    const y = H - bottom - h;
+    bars += '<rect x="' + x + '" y="' + y + '" width="' + bw + '" height="' + h +
+            '" rx="3" fill="' + (byDay[d] < 0 ? '#d64545' : '#fbcf02') + '"></rect>';
+    if (days.length <= 16 || i % 2 === 0) {
+      bars += '<text x="' + (x + bw / 2) + '" y="' + (H - 6) +
+              '" font-size="10" text-anchor="middle" fill="#7a8494">' + d + '.10</text>';
+    }
+  });
+  // подпись оси Y (максимум)
+  bars += '<text x="4" y="' + (top + 8) + '" font-size="10" fill="#7a8494">' +
+          rub(maxV) + ' ₽</text>';
+  bars += '<line x1="' + padL + '" y1="' + (H - bottom) + '" x2="' + (W - padR) +
+          '" y2="' + (H - bottom) + '" stroke="#e6e9ee"></line>';
+  el.innerHTML = '<svg viewBox="0 0 ' + W + ' ' + H + '" width="' + W +
+                 '" height="' + H + '" role="img" aria-label="Выручка по дням">' +
+                 bars + '</svg>';
+}
+
+/** Заполняет таблицу товаров по окну. */
+function renderTable(rows) {
+  const agg = {};
+  rows.forEach(r => {
+    if (!agg[r.product]) agg[r.product] = { buy: 0, retQty: 0, retSum: 0, sum: 0 };
+    if (r.event === 'выкуп') { agg[r.product].buy += r.qty; agg[r.product].sum += r.sum_rub; }
+    else { agg[r.product].retQty += r.qty; agg[r.product].retSum += r.sum_rub;
+           agg[r.product].sum -= r.sum_rub; }
+  });
+  const total = Object.values(agg).reduce((s, a) => s + a.sum, 0);
+  const names = Object.keys(agg).sort((a, b) => agg[b].sum - agg[a].sum);
+  const html = names.map(k => {
+    const a = agg[k];
+    const share = total ? (a.sum / total * 100).toFixed(1) : '0.0';
+    return '<tr><td>' + k + '</td><td class="num">' + a.buy +
+           '</td><td class="num tbl-hide-920">' + a.retQty +
+           '</td><td class="num tbl-hide-560">' + rub(a.retSum) +
+           '</td><td class="num">' + rub(a.sum) +
+           '</td><td class="num tbl-hide-920">' + share + '</td></tr>';
+  }).join('');
+  $('tbl').innerHTML = html;
+}
+
+/** Пересчитывает всё окно: KPI, график, таблицу. Единая точка правды. */
+function renderAll() {
+  const state = readState();
+  const rows = windowRows(state);
+  const m = computeMetrics(rows);
+  $('kRev').textContent = rub(m.revenue);
+  $('kOrd').textContent = m.orderCount.toLocaleString('ru-RU');
+  $('kAvg').textContent = rub(m.avg);
+  $('kRet').textContent = '−' + rub(m.retSum);
+  const d = weekDelta(state);
+  $('kDelta').textContent = d ? d.label : 'недели для сравнения нет';
+  drawChart(rows, state);
+  renderTable(rows);
+}
+
+// ---- инициализация ----
+const prods = [...new Set(DATA.map(r => r.product))].sort();
+prods.forEach(p => {
+  const o = document.createElement('option');
+  o.value = p; o.textContent = p;
+  $('prod').appendChild(o);
+});
+$('period').addEventListener('change', renderAll);
+$('prod').addEventListener('change', renderAll);
+renderAll();
+
+// ---- перерисовка графика при изменении ширины окна ----
+if (typeof ResizeObserver !== 'undefined') {
+  let raf = 0;
+  const obs = new ResizeObserver(() => {
+    cancelAnimationFrame(raf);
+    raf = requestAnimationFrame(() => drawChart(windowRows(readState()), readState()));
+  });
+  obs.observe($('chart').parentElement);
+  const wrap = document.querySelector('.wrap');
+  if (wrap) obs.observe(wrap);
+}
+</script>
+</body>
+</html>
